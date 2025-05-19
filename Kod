@@ -1,0 +1,221 @@
+import java.io.*;
+import java.nio.file.*;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * Uçak Bilet Rezervasyon Konsol Uygulaması
+ */
+public class Main {
+
+    /* ---------- BASIT YARDIMCI ARAYÜZ ---------- */
+    interface CSVConvertible { String toCSV(); }
+
+    /* ---------- ENTITY SINIFLARI ---------- */
+    // 1) Plane
+    static class Plane implements CSVConvertible {
+        private static final AtomicInteger COUNTER = new AtomicInteger(1);
+        private final int id;
+        private String model, brand, serialNumber;
+        private int seatCapacity;
+
+        Plane(String model, String brand, String serialNumber, int seatCapacity) {
+            this.id = COUNTER.getAndIncrement();
+            this.model = model;
+            this.brand = brand;
+            this.serialNumber = serialNumber;
+            this.seatCapacity = seatCapacity;
+        }
+        int  getId()          { return id; }
+        int  getSeatCapacity(){ return seatCapacity; }
+
+        @Override public String toCSV() {
+            return id + ";" + model + ";" + brand + ";" + serialNumber + ";" + seatCapacity;
+        }
+        @Override public String toString() {
+            return "["+id+"] " + brand + " " + model +
+                   " (Seri: " + serialNumber + ", Koltuk: " + seatCapacity + ")";
+        }
+    }
+
+    // 2) Location
+    static class Location implements CSVConvertible {
+        private static final AtomicInteger COUNTER = new AtomicInteger(1);
+        private final int id;
+        private String country, city, airport;
+        private boolean active;
+
+        Location(String country, String city, String airport, boolean active) {
+            this.id = COUNTER.getAndIncrement();
+            this.country = country; this.city = city;
+            this.airport = airport; this.active = active;
+        }
+        int  getId()    { return id; }
+        boolean isActive(){ return active; }
+
+        @Override public String toCSV() {
+            return id + ";" + country + ";" + city + ";" + airport + ";" + active;
+        }
+        @Override public String toString() {
+            return "["+id+"] " + airport + " / " + city + " - " + country +
+                   (active ? "" : " (Pasif)");
+        }
+    }
+
+    // 3) Reservation
+    static class Reservation implements CSVConvertible {
+        private int flightId;
+        private String firstName, lastName;
+        private int age;
+
+        Reservation(int flightId, String firstName, String lastName, int age) {
+            this.flightId = flightId; this.firstName = firstName;
+            this.lastName = lastName; this.age = age;
+        }
+        int getFlightId() { return flightId; }
+
+        @Override public String toCSV() {
+            return flightId + ";" + firstName + ";" + lastName + ";" + age;
+        }
+        @Override public String toString() {
+            return firstName + " " + lastName + " ("+age+")";
+        }
+    }
+
+    // 4) Flight
+    static class Flight implements CSVConvertible {
+        private static final AtomicInteger COUNTER = new AtomicInteger(1);
+
+        private final int id;
+        private Location origin, destination;
+        private LocalDateTime dateTime;
+        private Plane plane;
+        private final List<Reservation> reservations = new ArrayList<>();
+
+        Flight(Location origin, Location destination, LocalDateTime dateTime, Plane plane){
+            this.id = COUNTER.getAndIncrement();
+            this.origin = origin; this.destination = destination;
+            this.dateTime = dateTime; this.plane = plane;
+        }
+        int  getId() { return id; }
+        int  getAvailableSeats(){ return plane.getSeatCapacity() - reservations.size(); }
+
+        boolean addReservation(Reservation r){
+            if(getAvailableSeats()>0){ reservations.add(r); return true; }
+            return false;
+        }
+
+        @Override public String toCSV() {
+            return id + ";" + origin.getId() + ";" + destination.getId() + ";" +
+                   dateTime + ";" + plane.getId();
+        }
+        @Override public String toString() {
+            return "["+id+"] " + origin + " → " + destination +
+                   "  " + dateTime + "  (" + getAvailableSeats() + " koltuk)";
+        }
+    }
+
+    /* ---------- DOSYA YAZ / OKU YARDIMCISI ---------- */
+    static class DataStore {
+        private static final String BASE = "./";          // klasör yolu
+
+        // Listeyi CSV’ye dök
+        static <T extends CSVConvertible> void save(String file, Collection<T> list){
+            try(PrintWriter pw = new PrintWriter(
+                    Files.newBufferedWriter(Paths.get(BASE + file)))){
+                list.forEach(o -> pw.println(o.toCSV()));
+            }catch(IOException e){ System.err.println("Yazma hatası: "+e); }
+        }
+    }
+
+    /* ---------- MAIN / KONSOL ARAYÜZÜ ---------- */
+    private final List<Plane>        planes        = new ArrayList<>();
+    private final List<Location>     locations     = new ArrayList<>();
+    private final List<Flight>       flights       = new ArrayList<>();
+    private final List<Reservation>  reservations  = new ArrayList<>();
+    private final Scanner            sc            = new Scanner(System.in);
+
+    public static void main(String[] args){ new Main().run(); }
+
+    private void run(){
+        loadSampleData();       // Şimdilik örnek kayıtlar
+        loopMenu();             // Ana menü
+    }
+
+    private void loopMenu(){
+        while(true){
+            System.out.println("\n=== UÇAK BİLET REZERVASYON ===");
+            System.out.println("1) Uçuşları Listele");
+            System.out.println("2) Rezervasyon Yap");
+            System.out.println("0) Çıkış");
+            System.out.print("Seçim: ");
+            switch(sc.nextLine()){
+                case "1" -> listFlights();
+                case "2" -> makeReservation();
+                case "0" -> { saveAll(); System.out.println("İyi günler!"); return; }
+                default  -> System.out.println("Geçersiz seçim!");
+            }
+        }
+    }
+
+    /* ----------- Menü İşlevleri ----------- */
+    private void listFlights(){ flights.forEach(System.out::println); }
+
+    private void makeReservation(){
+        listFlights();
+        System.out.print("Uçuş ID: ");
+        int fId = tryParseInt(sc.nextLine());
+        Flight fl = flights.stream().filter(f -> f.getId()==fId)
+                           .findFirst().orElse(null);
+        if(fl==null){ System.out.println("Uçuş bulunamadı!"); return; }
+        if(fl.getAvailableSeats()==0){
+            System.out.println("Bu uçuşta boş koltuk yok!"); return;
+        }
+
+        System.out.print("Ad: ");      String ad  = sc.nextLine().trim();
+        System.out.print("Soyad: ");   String soy = sc.nextLine().trim();
+        System.out.print("Yaş: ");     int yas   = tryParseInt(sc.nextLine());
+
+        Reservation r = new Reservation(fl.getId(), ad, soy, yas);
+        if(fl.addReservation(r)){ reservations.add(r);
+            System.out.println("Rezervasyon onaylandı!"); }
+        else  System.out.println("Rezervasyon başarısız.");
+    }
+
+    /* ----------- ÖRNEK VERİ ----------- */
+    private void loadSampleData(){
+        // Uçaklar
+        planes.add(new Plane("A320",      "Airbus",  "SN123", 180));
+        planes.add(new Plane("737-800",   "Boeing",  "SN987", 160));
+
+        // Lokasyonlar
+        locations.add(new Location("Türkiye","İstanbul","IST", true));
+        locations.add(new Location("Türkiye","Ankara",  "ESB", true));
+        locations.add(new Location("Almanya","Berlin",  "BER", true));
+
+        // Uçuşlar
+        flights.add(new Flight(
+                locations.get(0), locations.get(1),
+                LocalDateTime.now().plusDays(1).withHour(10).withMinute(0),
+                planes.get(0)));
+        flights.add(new Flight(
+                locations.get(1), locations.get(2),
+                LocalDateTime.now().plusDays(2).withHour(15).withMinute(30),
+                planes.get(1)));
+    }
+
+    /* ----------- KAYDET ----------- */
+    private void saveAll(){
+        DataStore.save("planes.csv",        planes);
+        DataStore.save("locations.csv",     locations);
+        DataStore.save("flights.csv",       flights);
+        DataStore.save("reservations.csv",  reservations);
+    }
+
+    /* ----------- Yardımcı ----------- */
+    private int tryParseInt(String s){
+        try{ return Integer.parseInt(s.trim()); }
+        catch(NumberFormatException e){ return -1; }
+    }
+}
